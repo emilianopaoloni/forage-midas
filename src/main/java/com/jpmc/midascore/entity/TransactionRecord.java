@@ -16,6 +16,8 @@ public class TransactionRecord {
 	@Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+	
+	private float incentive;
 
     // Relación de muchos a uno: Muchas transacciones pueden pertenecer a un solo usuario
     @ManyToOne
@@ -24,16 +26,25 @@ public class TransactionRecord {
     @ManyToOne
     private UserRecord recipient;
 
-    private float amount;
+    public float getIncentive() {
+		return incentive;
+	}
+
+	public void setIncentive(float incentive) {
+		this.incentive = incentive;
+	}
+
+	private float amount;
 
     // Constructor vacío obligatorio para JPA
     public TransactionRecord() {}
 
     // Constructor para facilitarnos la vida
-    public TransactionRecord(UserRecord sender, UserRecord recipient, float amount) {
+    public TransactionRecord(UserRecord sender, UserRecord recipient, float amount, float incentive) {
         this.sender = sender;
         this.recipient = recipient;
         this.amount = amount;
+        this.incentive = incentive;
     }
 
 	

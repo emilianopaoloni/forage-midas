@@ -1,62 +1,66 @@
 package com.jpmc.midascore.component;
 
-import com.jpmc.midascore.entity.TransactionRecord;
-import com.jpmc.midascore.entity.UserRecord;
-import com.jpmc.midascore.foundation.Transaction;
-import com.jpmc.midascore.repository.TransactionRecordRepository;
-import com.jpmc.midascore.repository.UserRepository;
-
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.client.RestTemplate; // Importamos RestTemplate
+
+import com.jpmc.midascore.entity.TransactionRecord;
+import com.jpmc.midascore.entity.UserRecord;
+import com.jpmc.midascore.foundation.Incentive; // Importamos tu nueva clase
+import com.jpmc.midascore.foundation.Transaction;
+import com.jpmc.midascore.repository.TransactionRecordRepository;
+// Asegúrate de que estén los demás imports (User, Transaction, etc.)
+import com.jpmc.midascore.repository.UserRepository;
 
 @Component
 public class TransactionListener {
 
-	@Autowired
-    private UserRepository userRepository; // Herramienta para buscar usuarios en H2
+    @Autowired
+    private UserRepository userRepository;
 
     @Autowired
-    private TransactionRecordRepository transactionRecordRepository; // Herramienta para guardar la transacción
-	
-	
+    private TransactionRecordRepository transactionRecordRepository;
+
+    // Instanciamos nuestro "navegador interno" para llamar a la API
+    private final RestTemplate restTemplate = new RestTemplate();
+
     @KafkaListener(topics = "${general.kafka-topic}", groupId = "midas-group")
     public void listen(Transaction transaction) {
         
-        // 1. Buscar si el remitente y el destinatario existen en la base de datos
         UserRecord sender = userRepository.findById(transaction.getSenderId());
         UserRecord recipient = userRepository.findById(transaction.getRecipientId());
 
-        // 2. Validar las 3 reglas de negocio
-        	//validar que el monto de la transferencia es mayor o igual al monto del usuario emisor
         if (sender != null && recipient != null && sender.getBalance() >= transaction.getAmount()) {
             
-            // 3. Actualizar los saldos
-            sender.setBalance(sender.getBalance() - transaction.getAmount());
-            recipient.setBalance(recipient.getBalance() + transaction.getAmount());
+            //  Llamada a la API de Incentivos ---
+            // enviar la transacción a la URL y le decimos que esperamos un objeto Incentive de vuelta
+            Incentive incentive = restTemplate.postForObject(
+                    "http://localhost:8080/incentive", 
+                    transaction, 
+                    Incentive.class
+            );
+            
+            // extraer el número (si la API falla por algo, ponemos 0 como red de seguridad)
+            float incentiveAmount = (incentive != null) ? incentive.getAmount() : 0f;
 
-            // 4. Guardar los usuarios con sus nuevos saldos en la BD
+            // --- ACTUALIZADO: Nueva lógica de saldos ---
+            // Al remitente SOLO se le descuenta lo que transfirió (no paga el incentivo)
+            sender.setBalance(sender.getBalance() - transaction.getAmount());
+            
+            // Al destinatario se le suma la transferencia + el regalo del banco (incentivo)
+            recipient.setBalance(recipient.getBalance() + transaction.getAmount() + incentiveAmount);
+
             userRepository.save(sender);
             userRepository.save(recipient);
 
-            // 5. Crear el registro histórico y guardarlo
-            TransactionRecord record = new TransactionRecord(sender, recipient, transaction.getAmount());
+            // --- ACTUALIZADO: Guardamos el registro con los 4 datos ---
+            TransactionRecord record = new TransactionRecord(sender, recipient, transaction.getAmount(), incentiveAmount);
             transactionRecordRepository.save(record);
             
-            System.out.println("Transacción VÁLIDA procesada por: " + transaction.getAmount());
+            System.out.println("VÁLIDA - Monto: " + transaction.getAmount() + " | Incentivo: " + incentiveAmount);
         } else {
-            // Si no cumple las reglas, se descarta (no hacemos nada con la BD)
             System.out.println("Transacción INVÁLIDA descartada.");
         }
     }
-    
-    
-	
-	// Esta etiqueta lee el nombre del topic y un groupId desde application.yml
-    //@KafkaListener(topics = "${general.kafka-topic}", groupId = "midas-group")
-    //public void listen(Transaction transaction) {
-        
-    //    System.out.println("Transacción recibida"); //marco debugg en esta linea
-    //}
-    
 }
